@@ -1,3 +1,5 @@
+package net.kaneonexus.lunatic
+
 import android.graphics.Color
 import android.text.InputType
 import android.view.Gravity
