@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.LunaTic" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/nexus_cyan</item>
+        <item name="colorSecondary">@color/nexus_magenta</item>
+        <item name="android:windowBackground">@color/nexus_bg</item>
+        <item name="android:textColorPrimary">@color/nexus_text_primary</item>
+        <item name="android:textColorSecondary">@color/nexus_text_secondary</item>
+        <item name="android:statusBarColor">@color/nexus_bg</item>
+    </style>
+</resources>
