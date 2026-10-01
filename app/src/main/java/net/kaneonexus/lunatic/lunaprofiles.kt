@@ -1,5 +1,3 @@
-package net.kaneonexus.lunatic
-
 import android.content.Context
 import org.json.JSONObject
 import java.security.MessageDigest
