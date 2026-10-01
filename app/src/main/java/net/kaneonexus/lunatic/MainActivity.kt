@@ -30,7 +30,7 @@ class MainActivity : AppCompatActivity() {
     private fun renderMoonState() {
         val moon = MoonEngine.currentState()
         binding.phaseNameText.text = moon.phaseName
-        binding.illuminationText.text = "Illumination: ${moon.illuminationPct}%  ·  Age: %.1f days".format(moon.ageDays)
+        binding.illuminationText.text = "Illumination: ${moon.illuminationPct}%%  ·  Age: %.1f days".format(moon.ageDays)
         binding.gravIndexText.text = "Gravitational Index: ${moon.gravitationalIndex}/100 — ${moon.gravitationalLabel}"
 
         val daysToFull = MoonEngine.daysUntilNextFullMoon()
