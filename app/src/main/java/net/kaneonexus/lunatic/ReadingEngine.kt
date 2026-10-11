@@ -4,19 +4,20 @@ import kotlin.random.Random
 
 /**
  * Shared reading engine for LUNA-TIC.
- * One draw/spread system serves every deck (runes, tarot, playing cards),
- * so later decks only need a card list and a spread list.
- * All meanings are original text written for LUNA-TIC.
+ * One draw/spread system serves every deck, so a new deck only needs a card list
+ * and a spread list. All meanings are original text written for LUNA-TIC.
  */
 object ReadingEngine {
 
     enum class Kind(val label: String) {
         RUNES("Runes"),
         TAROT("Tarot"),
+        DARKDAYS("Dark Days"),
+        DEVIANT("Deviant Moon"),
         CARDS("Playing cards")
     }
 
-    /** reversed == "" means the card cannot be reversed (e.g. symmetrical runes, playing cards). */
+    /** reversed == "" means the card cannot be reversed (symmetrical runes, playing cards). */
     data class ReadCard(
         val name: String,
         val upright: String,
@@ -28,10 +29,39 @@ object ReadingEngine {
 
     data class Spread(val id: String, val name: String, val positions: List<String>)
 
-    data class Drawn(val position: String, val card: ReadCard, val isReversed: Boolean) {
-        val meaning: String get() = if (isReversed) card.reversed else card.upright
+    /** Dark Days reads a card four ways, tied to the moon's cycle. */
+    data class Orient(val name: String, val phase: String, val line: String)
+
+    val moonOrients: List<Orient> = listOf(
+        Orient("Upright", "Dark moon \u00B7 North \u00B7 Winter \u00B7 Earth",
+            "A quiet, inward message. Slow down, ground yourself, and let it settle before you act."),
+        Orient("Right-pointing", "Waxing moon \u00B7 East \u00B7 Spring \u00B7 Air",
+            "A message of beginnings and fresh thinking. Something is gathering; give it clarity and attention."),
+        Orient("Reversed", "Full moon \u00B7 South \u00B7 Summer \u00B7 Fire",
+            "A message at full strength: lit up and hard to ignore. Look at its shadow side too."),
+        Orient("Left-pointing", "Waning moon \u00B7 West \u00B7 Autumn \u00B7 Water",
+            "A message of release. Let feeling move, and let go of what has done its work.")
+    )
+
+    data class Drawn(
+        val position: String,
+        val card: ReadCard,
+        val isReversed: Boolean,
+        val orient: Int = -1 // index into moonOrients, or -1 when not used
+    ) {
+        val meaning: String
+            get() {
+                if (orient >= 0) {
+                    val o = moonOrients[orient]
+                    val shadow = if (orient == 2 && card.reversed.isNotEmpty()) "\nShadow side: ${card.reversed}" else ""
+                    return "${o.phase}\n${o.line}\n\n${card.upright}$shadow"
+                }
+                return if (isReversed) card.reversed else card.upright
+            }
+
         val label: String
             get() {
+                if (orient >= 0) return "${card.name} \u2014 ${moonOrients[orient].name}"
                 val g = if (card.glyph.isNotEmpty()) "${card.glyph} " else ""
                 val r = if (isReversed) " (reversed)" else ""
                 return "$g${card.name}$r"
@@ -59,6 +89,12 @@ object ReadingEngine {
 
     // ---------------------------------------------------------------- spreads
 
+    private val celticPositions = listOf(
+        "The present", "The challenge", "The foundation", "The recent past",
+        "The crown (best outcome)", "The near future", "The self",
+        "Surroundings", "Hopes and fears", "The outcome"
+    )
+
     fun spreads(kind: Kind): List<Spread> = when (kind) {
         Kind.RUNES -> listOf(
             Spread("r1", "One rune", listOf("Guidance")),
@@ -68,31 +104,53 @@ object ReadingEngine {
         Kind.TAROT -> listOf(
             Spread("t1", "One card", listOf("The card")),
             Spread("t3", "Three cards", listOf("Past", "Present", "Future")),
-            Spread(
-                "tcc", "Celtic Cross", listOf(
-                    "The present", "The challenge", "The foundation", "The recent past",
-                    "The crown (best outcome)", "The near future", "The self",
-                    "Surroundings", "Hopes and fears", "The outcome"
-                )
-            )
+            Spread("tcc", "Celtic Cross", celticPositions)
+        )
+        Kind.DARKDAYS -> listOf(
+            Spread("d1", "One card", listOf("The card")),
+            Spread("d3", "Three cards", listOf("Past", "Present", "Future")),
+            Spread("dm4", "Moon cycle", listOf(
+                "Dark moon: what is hidden",
+                "Waxing: what is growing",
+                "Full: what is revealed",
+                "Waning: what to release"
+            )),
+            Spread("dcc", "Celtic Cross", celticPositions)
+        )
+        Kind.DEVIANT -> listOf(
+            Spread("v1", "One card", listOf("The card")),
+            Spread("v3", "Three cards", listOf("Past", "Present", "Future")),
+            Spread("vmc", "Moon circle", listOf(
+                "You, right now", "Past influences", "Subconscious currents",
+                "Secret wishes", "Hidden forces", "What is coming",
+                "Your surroundings", "Other people", "Spiritual currents", "The outcome"
+            )),
+            Spread("vcc", "Celtic Cross", celticPositions)
         )
         Kind.CARDS -> listOf(
             Spread("c1", "One card", listOf("The card")),
             Spread("c3", "Three cards", listOf("Past", "Present", "Future")),
-            Spread(
-                "c9", "Nine-card square", listOf(
-                    "Roots", "Recent past", "Fading influence",
-                    "The present", "Heart of the matter", "Hidden factor",
-                    "Coming soon", "Advice", "Outcome"
-                )
-            )
+            Spread("c9", "Nine-card square", listOf(
+                "Roots", "Recent past", "Fading influence",
+                "The present", "Heart of the matter", "Hidden factor",
+                "Coming soon", "Advice", "Outcome"
+            ))
         )
     }
 
     fun deck(kind: Kind): List<ReadCard> = when (kind) {
         Kind.RUNES -> runeDeck
         Kind.TAROT -> tarotDeck
+        Kind.DARKDAYS -> darkDaysDeck
+        Kind.DEVIANT -> deviantDeck
         Kind.CARDS -> playingDeck
+    }
+
+    /** Label for the reversal / orientation toggle, or null if the deck has none. */
+    fun orientationLabel(kind: Kind): String? = when (kind) {
+        Kind.CARDS -> null
+        Kind.DARKDAYS -> "Moon orientation"
+        else -> "Reversals"
     }
 
     // ---------------------------------------------------------------- drawing
@@ -107,8 +165,12 @@ object ReadingEngine {
         val shuffled = deck(kind).shuffled(rng)
         val drawn = spread.positions.mapIndexed { i, pos ->
             val c = shuffled[i]
-            val rev = allowReversed && c.canReverse && rng.nextBoolean()
-            Drawn(pos, c, rev)
+            if (kind == Kind.DARKDAYS && allowReversed) {
+                Drawn(pos, c, false, rng.nextInt(4))
+            } else {
+                val rev = allowReversed && c.canReverse && rng.nextBoolean()
+                Drawn(pos, c, rev)
+            }
         }
         return Reading(kind, spread, question.trim(), drawn)
     }
@@ -157,7 +219,25 @@ object ReadingEngine {
             "Inheritance withheld; rootlessness, or clinging to what has outlived its purpose.", "\u16DF")
     )
 
-    // ------------------------------------------------------------------ tarot
+    // ------------------------------------------------------ shared tarot tools
+
+    private fun buildMinors(
+        suits: List<Pair<String, String>>,
+        ranks: List<Triple<String, String, String>>,
+        overrides: Map<String, Pair<String, String>>
+    ): List<ReadCard> = suits.flatMap { (suit, domain) ->
+        ranks.map { (rank, up, rev) ->
+            val name = "$rank of $suit"
+            val o = overrides[name]
+            if (o != null) {
+                ReadCard(name, o.first, o.second)
+            } else {
+                ReadCard(name, up.replace("%s", domain) + ".", rev.replace("%s", domain) + ".")
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ standard tarot
 
     private val majors: List<ReadCard> = listOf(
         ReadCard("The Fool", "A fresh start and a leap of faith: innocence, open potential.",
@@ -231,12 +311,167 @@ object ReadingEngine {
     )
 
     private val tarotDeck: List<ReadCard> by lazy {
-        val minors = tarotSuits.flatMap { (suit, domain) ->
-            tarotRanks.map { (rank, up, rev) ->
-                ReadCard("$rank of $suit", up.replace("%s", domain) + ".", rev.replace("%s", domain) + ".")
-            }
-        }
-        majors + minors
+        majors + buildMinors(tarotSuits, tarotRanks, emptyMap())
+    }
+
+    // -------------------------------------------------------------- Dark Days
+
+    private val darkDaysMajors: List<ReadCard> = listOf(
+        ReadCard("The Fool", "Stepping into the unknown with light-hearted trust: play, wonder, an open road.",
+            "Naivety or avoidance; a leap made without looking, or fear of the first step."),
+        ReadCard("The Magician", "Will meets spirit: you can shape what you want most if you picture it clearly.",
+            "Talent scattered or used to mislead; a plan that never leaves the mind."),
+        ReadCard("The High Priestess", "The hidden knowing of the subconscious: dreams, ancestry, a message from below the surface.",
+            "Intuition ignored or muddied; secrets kept even from yourself."),
+        ReadCard("The Empress", "Fertile abundance: the body, the garden, creative life growing in its own time.",
+            "Overgiving or depletion; creative ground left fallow, or care withheld."),
+        ReadCard("The Emperor", "Order and protection: a structure strong enough to hold what you are building.",
+            "Rigidity or a crumbling structure; authority used without care."),
+        ReadCard("The Hierophant", "Inherited wisdom and ritual: learning from a lineage or a teacher you trust.",
+            "Dogma outgrown; time to build a practice of your own."),
+        ReadCard("The Lovers", "Union and the heart's true choice: desire and values pointing the same way.",
+            "Divided loyalties; a choice avoided, or closeness out of balance."),
+        ReadCard("The Chariot", "Will and momentum: opposing forces steered toward a single aim.",
+            "Losing the reins; drive with no direction."),
+        ReadCard("Strength", "Gentle power: taming the inner beast with patience, not force.",
+            "Doubt or swallowed fury; strength spent against yourself."),
+        ReadCard("The Hermit", "The lantern in the dark: retreat that brings clear inner guidance.",
+            "Withdrawal turned to loneliness; refusing the light you carry."),
+        ReadCard("Wheel of Fortune", "The cycle turns: luck, timing and the pull of larger rhythms.",
+            "Resisting the turning; bad timing that will pass."),
+        ReadCard("Justice", "Truth weighed fairly: an honest accounting, consequences that make sense.",
+            "Skewed judgment; dodging accountability."),
+        ReadCard("The Hanged Man", "Suspension and surrender: a changed view from letting the moment hold you.",
+            "Stuck for the sake of it; a sacrifice nobody asked for."),
+        ReadCard("Death", "A natural ending, the dark moon before renewal: release makes room.",
+            "Holding on to what is already gone; transition dragged out by fear."),
+        ReadCard("Temperance", "Gentle blending: patience and the middle way between extremes.",
+            "Imbalance or impatience; ingredients that do not yet mix."),
+        ReadCard("The Devil", "Shadow and attachment: what binds you is also showing you your power.",
+            "Chains loosening; a bond recognized and ready to be released."),
+        ReadCard("The Tower", "A sudden collapse of what was built on false ground: lightning that frees.",
+            "Disruption resisted or delayed; fear of the necessary fall."),
+        ReadCard("The Star", "Quiet hope and healing: faith renewed under open sky.",
+            "Hope dimmed; disconnection from what restores you."),
+        ReadCard("The Moon", "Dreams, tides and illusion: trust what you feel, but check what is real.",
+            "Fog thinning; fears named, or illusion deepening."),
+        ReadCard("The Sun", "Plain joy, clarity and vitality: things are warm and visible.",
+            "Joy muted; clouds passing, or certainty too bright to question."),
+        ReadCard("Judgement", "A calling heard: reckoning, forgiveness and rising renewed.",
+            "Self-judgment, or ignoring the call; a reckoning put off."),
+        ReadCard("The World", "A cycle complete and whole: integration, with the next circle already forming.",
+            "A last loose end; completion just out of reach.")
+    )
+
+    private val darkDaysSuits = listOf(
+        "Wands" to "will, passion and creative fire",
+        "Swords" to "thought, clarity and honest speech",
+        "Cups" to "emotion and the heart's tides",
+        "Pentacles" to "the body, work and resources"
+    )
+
+    private val darkDaysRanks = listOf(
+        Triple("Ace", "Independence, will and a clear new purpose in %s", "A purpose still unformed, or will held back in %s"),
+        Triple("Two", "Balance, contrast and a choice between two in %s", "Pulled between opposites in %s"),
+        Triple("Three", "Fertile collaboration and growth in %s", "Growth stalled or crowded in %s"),
+        Triple("Four", "Stability and endurance in %s", "Rigidity or stagnation in %s"),
+        Triple("Five", "Erratic motion and a shifting self-image in %s", "Steadying after upheaval in %s"),
+        Triple("Six", "Sincerity and gentle movement in %s", "Insincerity, or a move that will not come in %s"),
+        Triple("Seven", "Conflict that leads to understanding in %s", "Avoiding the conflict, or understanding withheld in %s"),
+        Triple("Eight", "Opportunity and repeated, intentional effort in %s", "A missed opening, or empty repetition in %s"),
+        Triple("Nine", "Vision and attainment, and the influence they bring, in %s", "Vision clouded, or attainment just out of reach in %s"),
+        Triple("Ten", "A threshold from an ending into a beginning in %s", "An ending resisted in %s"),
+        Triple("Page", "A messenger or muse arriving in %s", "A message misheard, or a muse ignored in %s"),
+        Triple("Knight", "Help, sharp focus and decisive change in %s", "Haste or misdirected action in %s"),
+        Triple("Queen", "Compassionate, sustaining mastery of %s", "Mastery turned inward or withheld in %s"),
+        Triple("King", "Mature, brave command of %s", "Control hardened into domination in %s")
+    )
+
+    private val darkDaysDeck: List<ReadCard> by lazy {
+        darkDaysMajors + buildMinors(darkDaysSuits, darkDaysRanks, emptyMap())
+    }
+
+    // ------------------------------------------------------------ Deviant Moon
+
+    private val deviantMajors: List<ReadCard> = listOf(
+        ReadCard("The Fool", "Wandering into the unknown without fear because without experience: innocence, folly, raw potential.",
+            "Unsure steps; the moment missed, or fear arriving too late."),
+        ReadCard("The Magician", "A natural gift put to work: emerging skill and clever hands.",
+            "Talent misapplied; confusion and scattered effort."),
+        ReadCard("The High Priestess", "Guarded wisdom earned through hardship: deep intuition, a keeper of what she knows.",
+            "Willful ignorance; feelings held back, vision clouded."),
+        ReadCard("The Empress", "Fertility and the authority of nature: a strong maternal force.",
+            "Strife at home, or a creative drought; trust broken."),
+        ReadCard("The Emperor", "Command and ambition: achievement enjoyed while the next conquest is already in sight.",
+            "Weakness at the top; indecision, a ruler out of his depth."),
+        ReadCard("The Hierophant", "Faith as comfort and as control: counsel, mercy, conformity.",
+            "Unorthodox paths; poor advice, hollow authority."),
+        ReadCard("The Lovers", "Passion held in a hypnotic trance: love with a sting in it.",
+            "Separation and division; the spell breaking."),
+        ReadCard("The Chariot", "Leaving the city stronger for past hardship: a bold journey into new ground.",
+            "Plans collapsing; a poor strategy."),
+        ReadCard("Strength", "Will pressed on a wild thing: endurance, with the risk that the beast prevails.",
+            "Defeat, or surrender to the thing you tried to control."),
+        ReadCard("The Hermit", "Retreat into a private alcove: solitude and secrecy, never quite alone with yourself.",
+            "Rejoining the crowd; sharing what was hidden."),
+        ReadCard("Wheel of Fortune", "Fate spun by an indifferent hand: chance and unplanned events.",
+            "Unlucky turns and unexpected results."),
+        ReadCard("Justice", "Balance and fairness, in a city where corruption seeps through the seams.",
+            "Bias, abuse of the scales, taking sides."),
+        ReadCard("The Hanged Man", "Dangling in limbo: indecision while time keeps moving.",
+            "Time wasted; feeling stalled in life."),
+        ReadCard("Death", "Endings and rebirth entwined: loss and metamorphosis.",
+            "Violent, unsettled change; a hard stretch."),
+        ReadCard("Temperance", "Patient blending of unlike things into harmony.",
+            "Discord, excess, mixtures that go wrong."),
+        ReadCard("The Devil", "Obsessive desire and bondage: material chains and dark fantasies.",
+            "Greed and relentless acquiring; control over another mind."),
+        ReadCard("The Tower", "The lightning strikes: ruin, sudden upheaval, trauma.",
+            "Unable to break free of sorrow; ruin that keeps repeating."),
+        ReadCard("The Star", "Hope shining over bleak places: renewed faith.",
+            "Doubting your own gifts; creativity gone stagnant."),
+        ReadCard("The Moon", "The deviant moon pulls the strings: illusion, trickery, control working below awareness.",
+            "Avoiding reality; delusion, lies and despair."),
+        ReadCard("The Sun", "Two made one under a shared light: friendship, joy, a happy bond.",
+            "Loneliness; unstable bonds and parting."),
+        ReadCard("Judgement", "The dead rise: accountability and awakening.",
+            "Dread of the reckoning; guilt, worry and delay."),
+        ReadCard("The World", "A long road home that leaves you changed: victory earned the slow way, a cycle complete.",
+            "Frustration; a cycle left unfinished.")
+    )
+
+    private val deviantSuits = listOf(
+        "Swords" to "conflict, secrets and sorrow",
+        "Wands" to "creative fire and daring",
+        "Cups" to "love, dreams and the sea",
+        "Pentacles" to "labor, wealth and what money costs"
+    )
+
+    private val deviantOverrides: Map<String, Pair<String, String>> = mapOf(
+        "Four of Swords" to ("Rest and retreat underground: dreaming while energy slowly returns." to
+            "Rising back into daily life with renewed vigor."),
+        "Five of Swords" to ("A hollow, dishonorable win: someone enjoying another's loss." to
+            "A false friend exposed; the odds turning."),
+        "Seven of Swords" to ("A showy plan with a hidden flaw: the rope is already fraying." to
+            "A plan well thought through; sound advice."),
+        "Eight of Swords" to ("Bound by a trance and by outside control: restriction and censorship." to
+            "Waking up: freedom and independent thought."),
+        "Ten of Swords" to ("Total ruin, the shelter turned coffin: unbearable sorrow." to
+            "A pause in the calamity; a slight edge over hardship."),
+        "Six of Wands" to ("A transformation completed: emerging better than before." to
+            "A change not yet adapted to; delay."),
+        "Nine of Wands" to ("A pause inside the maze: gathering the will to keep going." to
+            "Giving up; obstacles that feel insurmountable."),
+        "Two of Cups" to ("A pact of love sealed under a dark sky: partnership, harmony." to
+            "Love that is false or broken; interests at odds."),
+        "Seven of Cups" to ("Imagination and daydreams: fantasy rendered as art." to
+            "Hard facts and realistic goals."),
+        "Ten of Pentacles" to ("Family wealth and values handed down, while something is quietly stolen." to
+            "Loss of home or money; family trouble.")
+    )
+
+    private val deviantDeck: List<ReadCard> by lazy {
+        deviantMajors + buildMinors(deviantSuits, tarotRanks, deviantOverrides)
     }
 
     // ------------------------------------------------------- playing cards

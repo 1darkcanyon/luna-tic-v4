@@ -252,6 +252,8 @@ class MainActivity : AppCompatActivity() {
 
         // Which oracle
         val kinds = ReadingEngine.Kind.values()
+        val kindScroll = HorizontalScrollView(this)
+        kindScroll.isHorizontalScrollBarEnabled = false
         val kindRow = LinearLayout(this)
         kindRow.orientation = LinearLayout.HORIZONTAL
         for (k in kinds) {
@@ -261,13 +263,16 @@ class MainActivity : AppCompatActivity() {
                 reading = null
                 readingSaved = false
                 render()
-            }, weightLp())
+            })
         }
-        box.addView(kindRow)
+        kindScroll.addView(kindRow)
+        box.addView(kindScroll)
 
         // Which spread
         val spreads = ReadingEngine.spreads(kind)
         if (spreadIdx >= spreads.size) spreadIdx = 0
+        val spreadScroll = HorizontalScrollView(this)
+        spreadScroll.isHorizontalScrollBarEnabled = false
         val spreadRow = LinearLayout(this)
         spreadRow.orientation = LinearLayout.HORIZONTAL
         spreads.forEachIndexed { i, s ->
@@ -276,13 +281,15 @@ class MainActivity : AppCompatActivity() {
                 reading = null
                 readingSaved = false
                 render()
-            }, weightLp())
+            })
         }
-        box.addView(spreadRow)
+        spreadScroll.addView(spreadRow)
+        box.addView(spreadScroll)
 
-        // Reversals (not used for playing cards)
-        if (kind != ReadingEngine.Kind.CARDS) {
-            box.addView(button(if (allowReversed) "Reversals: on" else "Reversals: off", false) {
+        // Reversals, or moon orientation for Dark Days (none for playing cards)
+        val orientLabel = ReadingEngine.orientationLabel(kind)
+        if (orientLabel != null) {
+            box.addView(button("$orientLabel: ${if (allowReversed) "on" else "off"}", false) {
                 allowReversed = !allowReversed
                 render()
             })
