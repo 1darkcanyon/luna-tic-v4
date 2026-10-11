@@ -1,11 +1,15 @@
 package net.kaneonexus.lunatic
 
+import android.content.Intent
 import android.graphics.Color
+import android.text.Editable
 import android.text.InputType
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -27,14 +31,29 @@ class MainActivity : AppCompatActivity() {
     private val MUTED = Color.parseColor("#8F9AB3")
 
     private lateinit var store: LunaProfiles
+    private lateinit var journal: JournalStore
     private lateinit var box: LinearLayout
+
+    // 0 Today, 1 7-day, 2 Readings, 3 Journal
     private var tab = 0
     private var createMode = false
     private var message = ""
 
+    // Readings state
+    private var kind = ReadingEngine.Kind.TAROT
+    private var spreadIdx = 0
+    private var allowReversed = true
+    private var question = ""
+    private var reading: ReadingEngine.Reading? = null
+    private var readingSaved = false
+
+    // Journal state
+    private var journalMsg = ""
+
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
         store = LunaProfiles(this)
+        journal = JournalStore(this)
         val sv = ScrollView(this)
         sv.setBackgroundColor(BG)
         sv.fitsSystemWindows = true
@@ -47,6 +66,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    private fun gap(h: Int) {
+        box.addView(View(this), LinearLayout.LayoutParams(1, dp(h)))
+    }
+
+    private fun weightLp(): LinearLayout.LayoutParams =
+        LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
 
     private fun tv(text: String, size: Float, color: Int, bold: Boolean = false): TextView {
         val t = TextView(this)
@@ -107,7 +133,7 @@ class MainActivity : AppCompatActivity() {
         title.letterSpacing = 0.08f
         box.addView(title)
         box.addView(tv("v4.0 \u00B7 lunar and emotional forecast", 13f, MUTED))
-        box.addView(View(this), LinearLayout.LayoutParams(1, dp(16)))
+        gap(16)
         val name = store.current()
         if (name == null) authScreen() else dashboard(name)
     }
@@ -145,16 +171,31 @@ class MainActivity : AppCompatActivity() {
         box.addView(card(*views.toTypedArray()))
     }
 
+    private fun go(t: Int) {
+        tab = t
+        journalMsg = ""
+        render()
+    }
+
     private fun dashboard(name: String) {
+        val scroller = HorizontalScrollView(this)
+        scroller.isHorizontalScrollBarEnabled = false
         val nav = LinearLayout(this)
         nav.orientation = LinearLayout.HORIZONTAL
-        val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        nav.addView(button("Today", tab == 0) { tab = 0; render() }, lp)
-        nav.addView(button("7-day", tab == 1) { tab = 1; render() }, lp)
-        nav.addView(button("Log out", false) { store.logout(); tab = 0; render() }, lp)
-        box.addView(nav)
-        box.addView(View(this), LinearLayout.LayoutParams(1, dp(14)))
-        if (tab == 0) today(name) else forecast()
+        nav.addView(button("Today", tab == 0) { go(0) })
+        nav.addView(button("7-day", tab == 1) { go(1) })
+        nav.addView(button("Readings", tab == 2) { go(2) })
+        nav.addView(button("Journal", tab == 3) { go(3) })
+        nav.addView(button("Log out", false) { store.logout(); tab = 0; render() })
+        scroller.addView(nav)
+        box.addView(scroller)
+        gap(14)
+        when (tab) {
+            0 -> today(name)
+            1 -> forecast()
+            2 -> readingsTab(name)
+            else -> journalTab(name)
+        }
     }
 
     private fun today(name: String) {
@@ -202,5 +243,143 @@ class MainActivity : AppCompatActivity() {
                 tv("${m.energy}. ${m.advice}", 14f, TEXT)))
         }
     }
-}
 
+    // ------------------------------------------------------------- readings
+
+    private fun readingsTab(name: String) {
+        box.addView(tv("Readings", 22f, MAGENTA, true))
+        gap(8)
+
+        // Which oracle
+        val kinds = ReadingEngine.Kind.values()
+        val kindRow = LinearLayout(this)
+        kindRow.orientation = LinearLayout.HORIZONTAL
+        for (k in kinds) {
+            kindRow.addView(button(k.label, k == kind) {
+                kind = k
+                spreadIdx = 0
+                reading = null
+                readingSaved = false
+                render()
+            }, weightLp())
+        }
+        box.addView(kindRow)
+
+        // Which spread
+        val spreads = ReadingEngine.spreads(kind)
+        if (spreadIdx >= spreads.size) spreadIdx = 0
+        val spreadRow = LinearLayout(this)
+        spreadRow.orientation = LinearLayout.HORIZONTAL
+        spreads.forEachIndexed { i, s ->
+            spreadRow.addView(button(s.name, i == spreadIdx) {
+                spreadIdx = i
+                reading = null
+                readingSaved = false
+                render()
+            }, weightLp())
+        }
+        box.addView(spreadRow)
+
+        // Reversals (not used for playing cards)
+        if (kind != ReadingEngine.Kind.CARDS) {
+            box.addView(button(if (allowReversed) "Reversals: on" else "Reversals: off", false) {
+                allowReversed = !allowReversed
+                render()
+            })
+        }
+        gap(10)
+
+        // Question
+        val q = field("Your question (optional)", InputType.TYPE_CLASS_TEXT)
+        q.setText(question)
+        q.addTextChangedListener(object : TextWatcher {
+            override fun afterTextChanged(s: Editable?) { question = s?.toString() ?: "" }
+            override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
+            override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
+        })
+        box.addView(q)
+        box.addView(button("Draw", true) {
+            reading = ReadingEngine.draw(kind, spreads[spreadIdx], question, allowReversed)
+            readingSaved = false
+            render()
+        })
+        gap(12)
+
+        val r = reading ?: return
+        box.addView(tv(r.title, 18f, TEAL, true))
+        if (r.question.isNotEmpty()) box.addView(tv("Q: ${r.question}", 13f, MUTED))
+        gap(8)
+        r.cards.forEachIndexed { i, d ->
+            box.addView(card(
+                tv("${i + 1} \u00B7 ${d.position}", 12f, MUTED),
+                tv(d.label, 17f, CYAN, true),
+                tv(d.meaning, 14f, TEXT)))
+        }
+        if (readingSaved) {
+            box.addView(tv("Saved to your journal.", 13f, TEAL))
+        } else {
+            box.addView(button("Save to journal", true) {
+                journal.addReading(r.title, r.toText(), name)
+                readingSaved = true
+                render()
+            })
+        }
+    }
+
+    // -------------------------------------------------------------- journal
+
+    private fun journalTab(name: String) {
+        box.addView(tv("Journal", 22f, MAGENTA, true))
+        gap(8)
+
+        val moodIn = field("Mood (1-10)", InputType.TYPE_CLASS_NUMBER)
+        val noteIn = EditText(this)
+        noteIn.hint = "How are you feeling today?"
+        noteIn.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+        noteIn.minLines = 3
+        noteIn.gravity = Gravity.TOP
+        noteIn.setTextColor(TEXT)
+        noteIn.setHintTextColor(MUTED)
+
+        box.addView(card(
+            tv("New entry", 16f, TEAL, true),
+            moodIn,
+            noteIn,
+            tv(journalMsg, 13f, TEAL),
+            button("Save entry", true) {
+                val mood = moodIn.text.toString().toIntOrNull()
+                val note = noteIn.text.toString().trim()
+                if (mood == null || mood < 1 || mood > 10) {
+                    journalMsg = "Mood must be a number from 1 to 10."
+                } else if (note.isEmpty()) {
+                    journalMsg = "Write a short note first."
+                } else {
+                    journal.addEntry(mood, note, name)
+                    journalMsg = "Entry saved."
+                }
+                render()
+            }))
+
+        val entries = journal.allEntries(name)
+        box.addView(tv("Entries (${entries.size})", 14f, MUTED))
+        gap(8)
+        if (entries.isEmpty()) {
+            box.addView(tv("No entries yet.", 13f, MUTED))
+        } else {
+            for (e in entries.take(30)) {
+                val head = if (e.kind == "reading") "${e.timestamp} \u00B7 ${e.title}"
+                else "${e.timestamp} \u00B7 ${e.moonPhase} \u00B7 mood ${e.moodScore}/10"
+                box.addView(card(tv(head, 12f, MUTED), tv(e.note, 14f, TEXT)))
+            }
+            if (entries.size > 30) box.addView(tv("Showing the latest 30. Export includes everything.", 12f, MUTED))
+            gap(8)
+            box.addView(button("Export / share all", false) {
+                val i = Intent(Intent.ACTION_SEND)
+                i.type = "text/plain"
+                i.putExtra(Intent.EXTRA_SUBJECT, "LUNA-TIC journal")
+                i.putExtra(Intent.EXTRA_TEXT, journal.exportText(name))
+                startActivity(Intent.createChooser(i, "Export journal"))
+            })
+        }
+    }
+}
